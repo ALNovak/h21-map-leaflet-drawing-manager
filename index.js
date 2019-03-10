@@ -1,14 +1,10 @@
-
 /* 
 Leaflet.DrawingManager.js 
-Copyright Alex Wellerstein, 2018. 
 Licensed under the MIT License: https://opensource.org/licenses/MIT
 */
 
 let DRAWING_MODE_MARKER = "marker";
 let DRAWING_MODE_CIRCLE = "circle";
-let DRAWING_MODE_AREA = "area";
-let _fitBounds = true;
 
 (function (global, factory) {
     typeof exports === 'object' && typeof module !== 'undefined' ? factory() :
