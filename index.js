@@ -5,6 +5,7 @@ Licensed under the MIT License: https://opensource.org/licenses/MIT
 
 let DRAWING_MODE_MARKER = "marker";
 let DRAWING_MODE_CIRCLE = "circle";
+let DRAWING_MODE_AREA = "area";
 
 (function (global, factory) {
     typeof exports === 'object' && typeof module !== 'undefined' ? factory() :
@@ -25,14 +26,21 @@ let DRAWING_MODE_CIRCLE = "circle";
 
         initialize: function (map, opts) {
 
-            this.map = map;
-            this._opts = opts;
-            this._drawingType = opts.drawingMode || DRAWING_MODE_MARKER;
-            this._fitBounds = opts._fitBounds || true;
-            this.markerOptions = opts.markerOptions || {};
-            this.circleOptions = opts.circleOptions || {};
-            this._enableDraw = opts.enableDraw;
-            this.radius = opts.circleOptions.radius;
+            let me = this;
+
+            me.map = map;
+            me._opts = opts;
+            me._drawingType = opts.drawingMode || DRAWING_MODE_MARKER;
+            me._fitBounds = opts._fitBounds || true;
+            me.markerOptions = opts.markerOptions || {};
+            me.circleOptions = opts.circleOptions || {};
+            me.areaOptions = opts.areaOptions || {};
+            me._enableDraw = opts.enableDraw;
+            me.radius = opts.circleOptions.radius;
+
+            me.map.on('zoom', () => {
+                me.map.fire('draw:zoom_map', me._getZoom());
+            });
         },
 
 
@@ -49,6 +57,12 @@ let DRAWING_MODE_CIRCLE = "circle";
                 case DRAWING_MODE_CIRCLE:
                     me._bindCircle();
                     break;
+                case DRAWING_MODE_AREA:
+                    me._bindArea();
+                    break;
+                    default:
+                    me._redraw();
+                    break;
             }
         },
 
@@ -56,36 +70,21 @@ let DRAWING_MODE_CIRCLE = "circle";
 
             let me = this;
 
-            if (me._centerMarker) {
-                me.map.removeLayer(me._centerMarker);
-                me._centerMarker = null;
-            }
+            me.map.off('mousedown');
+            me.map.off('click');
 
-            this.map.off('click');
-
-
-            if (me.circle) {
-                me.map.removeLayer(me.circle);
-                me.map.removeLayer(me._vertexMarker);
-            }
+            me._removeCenterMarker();
+            me._removeCircle();
 
             var createcenterMarker = (e) => {
 
+                me._removeArea();
+                me._removeCenterMarker();
+                me._removeCircle();
 
-                if (me._centerMarker) {
-                    me.map.removeLayer(me._centerMarker);
-                    me._centerMarker = null;
-                    me.map.fire('draw:marker_remove', null);
-                }
 
                 if (e) {
                     me._setPosition(e);
-                }
-
-
-                if (me.circle) {
-                    me.map.removeLayer(me.circle);
-                    me.map.removeLayer(me._vertexMarker);
                 }
 
                 if (me.position) {
@@ -104,12 +103,11 @@ let DRAWING_MODE_CIRCLE = "circle";
                     me.map.fire('draw:marker_create', null);
 
                 }
-
             }
 
             if (!this._enableDraw) {
                 createcenterMarker();
-                this.map.off('click');
+                me.map.off('click');
             }
 
             this.map.on('click', (event) => {
@@ -155,6 +153,136 @@ let DRAWING_MODE_CIRCLE = "circle";
             }
         },
 
+
+        _bindArea: function () {
+
+            var me = this;
+
+            me._removeArea();
+            me._removeCenterMarker();
+            me._removeCircle();
+
+            var createArea = () => {
+
+                me._removeArea();
+
+                var patch = [];
+
+                me._setDrawing(false);
+
+                let options = {
+                    strokeColor: me.areaOptions.strokeColor,
+                    strokeOpacity: me.areaOptions.strokeOpacity,
+                    color: me.areaOptions.fillColor,
+                    fillOpacity: me.areaOptions.fillOpacity,
+                    strokeWeight: me.areaOptions.strokeWeight,
+                }
+
+                me.area = new L.polyline([], options).addTo(me.map);
+
+                me.map.on('mousemove', (event) => {
+                    patch.push(event.latlng)
+                    me.area.setLatLngs(patch);
+
+                });
+
+                me.map.once('mouseup', () => {
+
+                    me.map.off('mousemove');
+                    me.map.removeLayer(me.area);
+
+                    me.area = new L.polygon(patch, options).addTo(me.map);
+                    me._setDrawing(true);
+
+                    me.map.fire('draw:area_create', me._convertCoordinates(patch));
+
+                    me._fitBoundsArea(patch);
+                });
+            }
+
+            this.map.once('mousedown', () => {
+                createArea();
+            });
+        },
+
+        _redraw: function () {
+
+            let me = this;
+
+            me._removeArea();
+            me._removeCenterMarker();
+            me._removeCircle();
+        },
+
+
+        _removeCircle: function () {
+
+            let me = this;
+
+            if (me.circle) {
+                me.map.removeLayer(me.circle);
+                me.map.removeLayer(me._vertexMarker);
+                me.circle = null;
+                me._vertexMarker = null;
+                me.map.fire('draw:circle_remove', null);
+            }
+        },
+
+        _removeCenterMarker: function () {
+
+            let me = this;
+
+            if (me._centerMarker) {
+                me.map.removeLayer(me._centerMarker);
+                me._centerMarker = null;
+                me.map.fire('draw:marker_remove', null);
+            }
+        },
+
+        _removeArea: function () {
+
+            let me = this;
+
+            if (me.area) {
+                me.map.removeLayer(me.area);
+                me.area = null;
+                me.map.fire('draw:area_remove', null);
+            }
+        },
+
+        _setDrawing: function (enabled) {
+
+            let me = this;
+
+            enabled ? me.map.dragging.enable() : me.map.dragging.disable();
+            enabled ? me.map.scrollWheelZoom.enable() : me.map.scrollWheelZoom.disable();
+            enabled ? me.map.doubleClickZoom.enable() : me.map.doubleClickZoom.disable();
+        },
+
+        _fitBoundsArea: function () {
+
+            let me = this;
+
+            if (me.area) {
+                me.map.fitBounds(me.area.getBounds());
+            }
+        },
+
+        _convertCoordinates: function (coordinates) {
+
+            let positions = [];
+
+            for (var n = 0; n < coordinates.length; n++) {
+                let item = coordinates[n];
+                let position = {
+                    latitude: item.lat,
+                    longitude: item.lng,
+                }
+                positions.push(position);
+            }
+            return positions;
+
+        },
 
         setEnableDraw: function (enabled) {
 
@@ -239,8 +367,8 @@ let DRAWING_MODE_CIRCLE = "circle";
                 }
 
                 let pixel = {
-                    clientX: event.originalEvent.clientX,
-                    clientY: event.originalEvent.clientY,
+                    clientX: event.originalEvent.clientX + 3,
+                    clientY: event.originalEvent.clientY + 2,
                 }
                 let ev = {
                     pixel,
@@ -314,6 +442,29 @@ let DRAWING_MODE_CIRCLE = "circle";
             return info;
         },
 
+        _getZoom: function () {
+
+            let me = this;
+
+            let zoom = {
+                zoom: me.map.getZoom()
+            }
+            return zoom;
+        },
+
+
+        _getPosition: function () {
+
+            let me = this;
+
+            let position = {
+                latitude: me._centerMarker.getLatLng().lat,
+                longitude: me._centerMarker.getLatLng().lng
+            }
+
+            return position;
+        },
+
         onAdd: function (map) {
             this._map = map;
         },
@@ -327,11 +478,6 @@ let DRAWING_MODE_CIRCLE = "circle";
 
         _reset: function () { },
 
-        _redraw: function () {
-            if (!this._map) {
-                return;
-            }
-        },
     });
 
 })));
